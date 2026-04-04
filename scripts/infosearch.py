@@ -263,7 +263,7 @@ def process_request(token: str, domain: str, zone: str):
     :param zone: доменная зона
     """
     fqdn = f"{domain}.{zone}"
-    url = f"https://infosearch54321.xyz/api/{token}/search/{fqdn}"
+    url = f"https://infoapi24.store/api/{token}/search/{fqdn}"
 
     new_file = NEW_DIR / f"{fqdn}_new.json"
     old_file = OLD_DIR / f"{fqdn}_old.json"
