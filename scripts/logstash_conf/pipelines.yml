@@ -1,0 +1,19 @@
+- pipeline.id: domain-monitor
+  path.config: "/opt/Digital_Footprint_System/scripts/logstash_conf/domain-monitor.conf"
+  pipeline.workers: 1
+  queue.type: memory
+
+- pipeline.id: github-monitor
+  path.config: "/opt/Digital_Footprint_System/scripts/logstash_conf/github.conf"
+  pipeline.workers: 1
+  queue.type: memory
+
+- pipeline.id: infosearch
+  path.config: "/opt/Digital_Footprint_System/scripts/logstash_conf/infosearch.conf"
+  pipeline.workers: 1
+  queue.type: memory
+
+- pipeline.id: leakcheck
+  path.config: "/opt/Digital_Footprint_System/scripts/logstash_conf/leak.conf"
+  pipeline.workers: 1
+  queue.type: memory
