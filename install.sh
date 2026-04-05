@@ -10,9 +10,15 @@ RUNNER_SCRIPT="${APP_ROOT}/run_pipeline.sh"
 SYSTEMD_SERVICE="/etc/systemd/system/digital-footprint.service"
 SYSTEMD_TIMER="/etc/systemd/system/digital-footprint.timer"
 LOG_DIR="/var/log/digital_footprint"
-REPO_MIRROR_BASE="https://mirror.yandex.ru/mirrors/elastic/9/pool/main"
 
-# Если install.sh лежит рядом с папкой scripts
+ES_DEB_URL="https://mirror.yandex.ru/mirrors/elastic/9/pool/main/e/elasticsearch/elasticsearch-9.1.4-amd64.deb"
+LS_DEB_URL="https://mirror.yandex.ru/mirrors/elastic/9/pool/main/l/logstash/logstash-9.1.4-amd64.deb"
+KB_DEB_URL="https://mirror.yandex.ru/mirrors/elastic/9/pool/main/k/kibana/kibana-9.1.4-amd64.deb"
+
+ES_DEB_FILE="/tmp/elasticsearch-9.1.4-amd64.deb"
+LS_DEB_FILE="/tmp/logstash-9.1.4-amd64.deb"
+KB_DEB_FILE="/tmp/kibana-9.1.4-amd64.deb"
+
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_SRC="${INSTALL_DIR}/scripts"
 
@@ -42,6 +48,14 @@ detect_pkg_manager() {
     fi
 }
 
+check_arch() {
+    local arch
+    arch="$(dpkg --print-architecture)"
+    if [[ "${arch}" != "amd64" ]]; then
+        fail "Этот install.sh рассчитан на amd64, обнаружена архитектура: ${arch}"
+    fi
+}
+
 install_base_packages() {
     log "Установка базовых пакетов"
     apt-get update
@@ -62,57 +76,32 @@ install_base_packages() {
         python3-venv
 }
 
-detect_arch() {
-    local arch
-    arch="$(dpkg --print-architecture)"
-    case "${arch}" in
-        amd64) ELASTIC_ARCH="amd64" ;;
-        arm64) ELASTIC_ARCH="arm64" ;;
-        *)
-            fail "еподдерживаемая архитектура: ${arch}"
-            ;;
-    esac
+download_file() {
+    local url="$1"
+    local output="$2"
+
+    log "Скачивание ${url}"
+    curl -fL "$url" -o "$output" || fail "Не удалось скачать $url"
 }
 
-find_latest_deb() {
-    local package_name="$1"
-    local letter="$2"
-    local page
-    local relpath
+install_deb_file() {
+    local deb_file="$1"
+    local pkg_name="$2"
 
-    page="$(curl -fsSL "${REPO_MIRROR_BASE}/${letter}/" )" || return 1
-    relpath="$(echo "${page}" | grep -oE "${package_name}_[^\"]+_${ELASTIC_ARCH}\.deb" | sort -V | tail -n1)" || true
-
-    if [[ -z "${relpath}" ]]; then
-        return 1
-    fi
-
-    echo "${REPO_MIRROR_BASE}/${letter}/${package_name}/${relpath}"
+    log "Установка ${pkg_name} из ${deb_file}"
+    dpkg -i "$deb_file" || apt-get -f install -y
 }
 
-download_and_install_elastic_deb() {
-    local pkg="$1"
-    local letter="$2"
-    local url
-    local tmpfile
+install_elk_from_direct_urls() {
+    log "Установка Elasticsearch, Logstash, Kibana по прямым ссылкам"
 
-    url="$(find_latest_deb "${pkg}" "${letter}")" || fail "Не удалось найти пакет ${pkg} в зеркале"
-    tmpfile="/tmp/${pkg}.deb"
+    download_file "${ES_DEB_URL}" "${ES_DEB_FILE}"
+    download_file "${LS_DEB_URL}" "${LS_DEB_FILE}"
+    download_file "${KB_DEB_URL}" "${KB_DEB_FILE}"
 
-    log "Скачивание ${pkg}: ${url}"
-    curl -fL "${url}" -o "${tmpfile}" || fail "Не удалось скачать ${pkg}"
-
-    log "Установка ${pkg}"
-    dpkg -i "${tmpfile}" || apt-get -f install -y
-}
-
-install_elk_from_yandex_mirror() {
-    detect_arch
-
-    log "Установка Elasticsearch, Logstash, Kibana из зеркала Яндекса"
-    download_and_install_elastic_deb "elasticsearch" "e"
-    download_and_install_elastic_deb "logstash" "l"
-    download_and_install_elastic_deb "kibana" "k"
+    install_deb_file "${ES_DEB_FILE}" "elasticsearch"
+    install_deb_file "${LS_DEB_FILE}" "logstash"
+    install_deb_file "${KB_DEB_FILE}" "kibana"
 }
 
 prepare_directories() {
@@ -125,7 +114,6 @@ prepare_directories() {
     mkdir -p "${APP_ROOT}/result"
     mkdir -p "${LOG_DIR}"
 
-    # Базовые result-структуры под приложенные скрипты
     mkdir -p "${APP_ROOT}/result/domains-monitor/"{new,old,logs,jsonl}
     mkdir -p "${APP_ROOT}/result/github-monitor/"{new,old,logs,jsonl}
     mkdir -p "${APP_ROOT}/result/hh/"{new,old,logs,jsonl}
@@ -133,7 +121,6 @@ prepare_directories() {
     mkdir -p "${APP_ROOT}/result/leakcheck/"{new,old,logs,jsonl}
     mkdir -p "${APP_ROOT}/result/google_cse/"{new,old,logs,jsonl}
 
-    # Дополнительные директории на случай расширения
     mkdir -p "${APP_ROOT}/scripts/collect"
     mkdir -p "${APP_ROOT}/scripts/converters"
     mkdir -p "${APP_ROOT}/scripts/logstash_conf"
@@ -300,6 +287,7 @@ http.port: 9200
 EOF
     fi
 
+    systemctl daemon-reload
     systemctl enable elasticsearch
     systemctl restart elasticsearch
 
@@ -318,23 +306,14 @@ EOF
 try_set_elastic_password() {
     log "Попытка установить пароль для пользователя ${ELASTIC_USER}"
 
-    if command -v /usr/share/elasticsearch/bin/elasticsearch-reset-password >/dev/null 2>&1; then
-        if /usr/share/elasticsearch/bin/elasticsearch-reset-password -u "${ELASTIC_USER}" -b -s <<EOF
-${ELASTIC_PASSWORD}
-${ELASTIC_PASSWORD}
-EOF
-        then
-            log "Пароль пользователя ${ELASTIC_USER} установлен через elasticsearch-reset-password"
-            return 0
-        fi
+    if [[ -x /usr/share/elasticsearch/bin/elasticsearch-reset-password ]]; then
+        /usr/share/elasticsearch/bin/elasticsearch-reset-password -u "${ELASTIC_USER}" -b > /tmp/es_reset_output.txt 2>&1 || true
+        log "Автоматическая установка пароля через elasticsearch-reset-password может зависеть от версии Elastic"
     fi
 
-    if command -v /usr/share/elasticsearch/bin/elasticsearch-setup-passwords >/dev/null 2>&1; then
-        log "Найдена elasticsearch-setup-passwords, но полностью безынтерактивный режим может зависеть от версии"
-    fi
-
-    log "Не удалось гарантированно автоматически установить пароль. Проверь вручную при необходимости."
-    return 0
+    log "Требуемый пользователь: ${ELASTIC_USER}"
+    log "Требуемый пароль: ${ELASTIC_PASSWORD}"
+    log "Если пароль не применился автоматически, установи его вручную штатной утилитой Elasticsearch"
 }
 
 configure_kibana() {
@@ -380,8 +359,9 @@ create_env_examples() {
 main() {
     require_root
     detect_pkg_manager
+    check_arch
     install_base_packages
-    install_elk_from_yandex_mirror
+    install_elk_from_direct_urls
     prepare_directories
     copy_project_files
     install_python_dependencies
