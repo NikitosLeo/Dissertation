@@ -1,0 +1,6 @@
+requests
+python-whois
+pyOpenSSL
+shodan
+leakcheck
+google-api-python-client
