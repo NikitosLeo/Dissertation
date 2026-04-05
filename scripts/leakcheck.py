@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 
-from leakcheck import LeakCheckAPI
+from leakcheck import LeakCheckAPI_v2
 
 
 # Пути к входным файлам
@@ -247,7 +247,7 @@ def normalize_wrapper_result(result) -> list:
     return []
 
 
-def perform_leakcheck_lookup(api: LeakCheckAPI, query: str) -> list:
+def perform_leakcheck_lookup(api: LeakCheckAPI_v2, query: str) -> list:
     """
     Выполняет поиск через LeakCheck python-wrapper.
 
@@ -294,7 +294,7 @@ def perform_leakcheck_lookup(api: LeakCheckAPI, query: str) -> list:
     )
 
 
-def process_query(api: LeakCheckAPI, query: str):
+def process_query(api: LeakCheckAPI_v2, query: str):
     """
     Выполняет полный цикл обработки одного значения:
     1. Делает запрос через LeakCheck python-wrapper
@@ -360,7 +360,7 @@ def main():
     logging.info(f"Загружен LeakCheck token из {TOKEN_FILE}")
     logging.info(f"Загружены queries: {queries}")
 
-    api = LeakCheckAPI(api_key=api_key)
+    api = LeakCheckAPI_v2(api_key=api_key)
 
     for query in queries:
         process_query(api, query)
